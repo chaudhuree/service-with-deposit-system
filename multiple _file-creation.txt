@@ -1,0 +1,20 @@
+// create multiple files in the current directory
+$files = "file1.txt", "file2.txt", "file3.txt"
+foreach ($file in $files) {
+    New-Item -Name $file -ItemType "File"
+}
+
+
+// create multiple folders and files
+$folders = @(
+    "Folder1\Subfolder1\file1.txt",
+    "Folder2\Subfolder2\file2.txt",
+    "Folder3\Subfolder3\file3.txt"
+)
+
+foreach ($path in $folders) {
+    $folderPath = [System.IO.Path]::GetDirectoryName($path)  # Get the folder path
+    New-Item -Path $folderPath -ItemType Directory -Force      # Create the folder
+    New-Item -Path $path -ItemType File -Force                 # Create the file inside the folder
+}
+
