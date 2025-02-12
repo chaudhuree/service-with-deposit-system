@@ -57,6 +57,8 @@ const reservationSchema = new mongoose.Schema({
   },
   paymentMethodId: String,
   customerId: String,
+  refundId: String,
+  refundStatus: String,
 });
 
 const User = mongoose.model("User", userSchema);
@@ -188,7 +190,7 @@ app.post("/api/reservations/:id/payment-method", async (req, res) => {
   }
 });
 
-// Update Reservation Status and Charge Remaining Balance
+// Update Reservation Status and Handle Payments
 app.put("/api/reservations/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -202,10 +204,52 @@ app.put("/api/reservations/:id", async (req, res) => {
       return res.status(404).json({ message: "Reservation not found" });
     }
 
+    // Store the old status before updating
+    const oldStatus = reservation.status;
     reservation.status = status;
-    await reservation.save();
 
-    if (status === "completed") {
+    // Handle different status transitions
+    if (status === "cancelled" && oldStatus !== "cancelled") {
+      try {
+        // Get the payment intent to check if it's refundable
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          reservation.depositPaymentIntentId
+        );
+
+        if (paymentIntent.status === "succeeded") {
+          // Create a refund
+          const refund = await stripe.refunds.create({
+            payment_intent: reservation.depositPaymentIntentId,
+            reason: 'requested_by_customer',
+          });
+
+          // Save refund information to reservation
+          reservation.refundId = refund.id;
+          reservation.refundStatus = refund.status;
+          reservation.remainingAmount = 0; // Reset remaining amount since we're refunding
+          
+          await reservation.save();
+
+          return res.json({
+            success: true,
+            message: "Reservation cancelled and deposit refunded",
+            refund: refund,
+          });
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot refund payment that hasn't been completed",
+          });
+        }
+      } catch (error) {
+        console.error("Error processing refund:", error);
+        return res.status(400).json({
+          success: false,
+          message: "Failed to process refund",
+          error: error.message,
+        });
+      }
+    } else if (status === "completed") {
       const remainingAmount = reservation.remainingAmount;
 
       try {
@@ -213,7 +257,7 @@ app.put("/api/reservations/:id", async (req, res) => {
           amount: Math.round(remainingAmount * 100),
           currency: "usd",
           customer: reservation.customerId,
-          payment_method: "pm_card_visa",
+          payment_method: reservation.paymentMethodId, // Use saved payment method
           off_session: true,
           confirm: true,
         });
@@ -235,9 +279,11 @@ app.put("/api/reservations/:id", async (req, res) => {
       }
     }
     
+    // For other status changes, just save and return
+    await reservation.save();
     return res.json({ 
       success: true,
-      message: "Service Status Updated" 
+      message: "Reservation status updated successfully" 
     });
   } catch (error) {
     console.error(error);
