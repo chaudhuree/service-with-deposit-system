@@ -11,12 +11,124 @@ require("dotenv").config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Configure CORS
 app.use(cors({
-    origin: ['https://f0db-182-252-68-225.ngrok-free.app', 'http://localhost:5173'],
+    origin: ['https://f0db-182-252-68-225.ngrok-free.app', 'http://localhost:5174'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Webhook endpoint - must be before express.json() middleware
+app.post('/webhooks', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const endpointSecret = "whsec_IpjBFa7lqCuf90mQOuKA4TV1pMBe4Uga";
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.error(`Webhook Error: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  const handlePaymentIntent = async (paymentIntent) => {
+    try {
+      const reservation = await Reservation.findOne({
+        $or: [
+          { depositPaymentIntentId: paymentIntent.id },
+          { 'remainingPayments.paymentIntentId': paymentIntent.id }
+        ]
+      });
+
+      if (!reservation) {
+        console.log(`No reservation found for payment intent: ${paymentIntent.id}`);
+        return;
+      }
+
+      return {
+        userEmail: reservation.customerEmail,
+        reservationId: reservation._id
+      };
+    } catch (error) {
+      console.error('Error fetching reservation:', error);
+    }
+  };
+
+  try {
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        const paymentSuccess = await handlePaymentIntent(event.data.object);
+        console.log('💰 Payment Successful');
+        console.log('Customer Email:', paymentSuccess?.userEmail);
+        console.log('Payment Intent ID:', event.data.object.id);
+        console.log('Reservation ID:', paymentSuccess?.reservationId);
+        console.log('Status: Success');
+        break;
+
+      case 'payment_intent.payment_failed':
+        const paymentFailed = await handlePaymentIntent(event.data.object);
+        console.log('❌ Payment Failed');
+        console.log('Customer Email:', paymentFailed?.userEmail);
+        console.log('Reservation ID:', paymentFailed?.reservationId);
+        console.log('Status: Failed');
+        console.log('Failure Message:', event.data.object.last_payment_error?.message);
+        break;
+
+      case 'payment_intent.canceled':
+        const paymentCanceled = await handlePaymentIntent(event.data.object);
+        console.log('🚫 Payment Canceled');
+        console.log('Customer Email:', paymentCanceled?.userEmail);
+        console.log('Reservation ID:', paymentCanceled?.reservationId);
+        console.log('Status: Canceled');
+        break;
+
+      case 'refund.created':
+        const paymentIntent = await stripe.paymentIntents.retrieve(event.data.object.payment_intent);
+        const refundCreated = await handlePaymentIntent(paymentIntent);
+        console.log('♻️ Refund Created');
+        console.log('Customer Email:', refundCreated?.userEmail);
+        console.log('Reservation ID:', refundCreated?.reservationId);
+        console.log('Refund ID:', event.data.object.id);
+        console.log('Amount Refunded:', event.data.object.amount / 100);
+        console.log('Status: Refund Initiated');
+        break;
+
+      case 'refund.succeeded':
+        const successPaymentIntent = await stripe.paymentIntents.retrieve(event.data.object.payment_intent);
+        const refundSuccess = await handlePaymentIntent(successPaymentIntent);
+        console.log('✅ Refund Succeeded');
+        console.log('Customer Email:', refundSuccess?.userEmail);
+        console.log('Reservation ID:', refundSuccess?.reservationId);
+        console.log('Refund ID:', event.data.object.id);
+        console.log('Status: Refund Completed');
+        break;
+
+      case 'refund.failed':
+        const failedPaymentIntent = await stripe.paymentIntents.retrieve(event.data.object.payment_intent);
+        const refundFailed = await handlePaymentIntent(failedPaymentIntent);
+        console.log('❌ Refund Failed');
+        console.log('Customer Email:', refundFailed?.userEmail);
+        console.log('Reservation ID:', refundFailed?.reservationId);
+        console.log('Refund ID:', event.data.object.id);
+        console.log('Status: Refund Failed');
+        console.log('Failure Reason:', event.data.object.failure_reason);
+        break;
+
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+// JSON parsing middleware for all other routes
 app.use(express.json());
 
 // MongoDB Connection
@@ -30,9 +142,9 @@ mongoose
 
 // Define Schemas
 const userSchema = new mongoose.Schema({
-  name: String,
-  email: String,
-  stripeCustomerId: String, // Store Stripe Customer ID
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+  stripeCustomerId: String,
 });
 
 const serviceSchema = new mongoose.Schema({
@@ -42,14 +154,18 @@ const serviceSchema = new mongoose.Schema({
 });
 
 const reservationSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+  },
   serviceId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Service",
     required: true,
   },
   depositPaymentIntentId: String,
-  remainingAmount: Number, //save Remaining Amount
+  remainingAmount: Number,
   status: {
     type: String,
     enum: ["pending deposit", "in progress", "completed", "cancelled"],
@@ -59,6 +175,7 @@ const reservationSchema = new mongoose.Schema({
   customerId: String,
   refundId: String,
   refundStatus: String,
+  customerEmail: String,
 });
 
 const User = mongoose.model("User", userSchema);
@@ -138,7 +255,7 @@ app.post("/api/reservations", async (req, res) => {
       depositPaymentIntentId: paymentIntent.id,
       remainingAmount: remainingAmount,
       customerId: user.stripeCustomerId,
-      // We'll update the paymentMethodId after successful payment
+      customerEmail: user.email,
     });
     const savedReservation = await newReservation.save();
 
