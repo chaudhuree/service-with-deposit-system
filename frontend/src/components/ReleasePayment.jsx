@@ -1,84 +1,59 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 
-function CreateService() {
-    const [name, setName] = useState('');
-    const [price, setPrice] = useState('');
-    const [success, setSuccess] = useState(false);
+function ReleasePayment() {
+    const [reservationId, setReservationId] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const navigate = useNavigate();
+    const [successMessage, setSuccessMessage] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setIsLoading(true);
         setError(null);
-        setSuccess(false);
+        setSuccessMessage('');
 
         try {
-            const response = await fetch('http://localhost:5000/api/services', {
+            const response = await fetch(`http://localhost:5000/api/reservations/${reservationId}/release-payment`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    name,
-                    price: parseFloat(price)
-                }),
+                credentials: 'include'
             });
 
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.message || 'Failed to create service');
+                throw new Error(data.message || 'Failed to release payment');
             }
 
-            setSuccess(true);
-            setName('');
-            setPrice('');
+            setSuccessMessage('Payment released successfully!');
         } catch (err) {
             setError(err.message);
+        } finally {
+            setIsLoading(false);
         }
     };
 
     return (
-        <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-            <h2 style={{ marginBottom: '20px' }}>Create Service</h2>
-            
+        <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+            <h2 style={{ marginBottom: '20px' }}>Release Payment</h2>
             <form onSubmit={handleSubmit}>
                 <div style={{ marginBottom: '15px' }}>
                     <label style={{ display: 'block', marginBottom: '5px' }}>
-                        Service Name:
+                        Reservation ID:
                     </label>
                     <input
                         type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
+                        value={reservationId}
+                        onChange={(e) => setReservationId(e.target.value)}
                         style={{
                             width: '100%',
                             padding: '8px',
                             borderRadius: '4px',
                             border: '1px solid #ddd'
                         }}
-                    />
-                </div>
-
-                <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px' }}>
-                        Price (USD):
-                    </label>
-                    <input
-                        type="number"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
                         required
-                        min="0"
-                        step="0.01"
-                        style={{
-                            width: '100%',
-                            padding: '8px',
-                            borderRadius: '4px',
-                            border: '1px solid #ddd'
-                        }}
                     />
                 </div>
 
@@ -95,7 +70,7 @@ function CreateService() {
                     </div>
                 )}
 
-                {success && (
+                {successMessage && (
                     <div style={{ 
                         marginBottom: '20px',
                         padding: '10px',
@@ -104,27 +79,29 @@ function CreateService() {
                         borderRadius: '4px',
                         color: '#155724'
                     }}>
-                        Service created successfully!
+                        {successMessage}
                     </div>
                 )}
 
                 <button
                     type="submit"
+                    disabled={isLoading || !reservationId}
                     style={{
                         backgroundColor: '#5469d4',
                         color: 'white',
                         padding: '10px 20px',
                         borderRadius: '4px',
                         border: 'none',
-                        cursor: 'pointer',
+                        cursor: isLoading || !reservationId ? 'not-allowed' : 'pointer',
+                        opacity: isLoading || !reservationId ? 0.7 : 1,
                         width: '100%'
                     }}
                 >
-                    Create Service
+                    {isLoading ? 'Releasing Payment...' : 'Release Payment'}
                 </button>
             </form>
         </div>
     );
 }
 
-export default CreateService;
+export default ReleasePayment;

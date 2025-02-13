@@ -14,7 +14,7 @@ const port = process.env.PORT || 5000;
 
 // Configure CORS
 app.use(cors({
-    origin: ['https://f0db-182-252-68-225.ngrok-free.app', 'http://localhost:5174'],
+    origin: ['https://f0db-182-252-68-225.ngrok-free.app', 'http://localhost:5174', 'http://localhost:5173'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -59,13 +59,23 @@ app.post('/webhooks', express.raw({type: 'application/json'}), async (req, res) 
 
   try {
     switch (event.type) {
+      case 'payment_intent.amount_capturable_updated':
+        const paymentHeld = await handlePaymentIntent(event.data.object);
+        console.log('💫 Payment Held');
+        console.log('Customer Email:', paymentHeld?.userEmail);
+        console.log('Payment Intent ID:', event.data.object.id);
+        console.log('Reservation ID:', paymentHeld?.reservationId);
+        console.log('Amount Held:', event.data.object.amount / 100);
+        console.log('Status: Payment Held');
+        break;
+
       case 'payment_intent.succeeded':
         const paymentSuccess = await handlePaymentIntent(event.data.object);
-        console.log('💰 Payment Successful');
+        console.log('💰 Payment Released');
         console.log('Customer Email:', paymentSuccess?.userEmail);
         console.log('Payment Intent ID:', event.data.object.id);
         console.log('Reservation ID:', paymentSuccess?.reservationId);
-        console.log('Status: Success');
+        console.log('Status: Payment Released');
         break;
 
       case 'payment_intent.payment_failed':
@@ -164,18 +174,19 @@ const reservationSchema = new mongoose.Schema({
     ref: "Service",
     required: true,
   },
-  depositPaymentIntentId: String,
-  remainingAmount: Number,
   status: {
     type: String,
-    enum: ["pending deposit", "in progress", "completed", "cancelled"],
-    default: "pending deposit",
+    enum: ["pending", "in progress", "completed", "cancelled"],
+    default: "pending"
   },
+  depositPaymentIntentId: String,
+  remainingAmount: Number,
   paymentMethodId: String,
   customerId: String,
   refundId: String,
   refundStatus: String,
   customerEmail: String,
+  paymentHeld: { type: Boolean, default: false }
 });
 
 const User = mongoose.model("User", userSchema);
@@ -216,7 +227,7 @@ app.post("/api/services", async (req, res) => {
   }
 });
 
-// Create Reservation and process deposit
+// Create Reservation and process deposit with payment hold
 app.post("/api/reservations", async (req, res) => {
   try {
     const { userId, serviceId } = req.body;
@@ -231,19 +242,13 @@ app.post("/api/reservations", async (req, res) => {
     const depositAmount = service.price * 0.5;
     const remainingAmount = service.price * 0.5;
 
-    // 1. Create a Setup Intent to save the card for future use
-    const setupIntent = await stripe.setupIntents.create({
-      customer: user.stripeCustomerId,
-      payment_method_types: ['card'],
-      usage: 'off_session', // This allows the card to be used for future payments
-    });
-
-    // 2. Create a Payment Intent for the deposit
+    // Create a Payment Intent with manual capture
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(depositAmount * 100),
       currency: "usd",
       customer: user.stripeCustomerId,
-      setup_future_usage: 'off_session', // This tells Stripe to save the card
+      setup_future_usage: 'off_session',
+      capture_method: 'manual', // This enables payment holding
       automatic_payment_methods: {
         enabled: true,
       },
@@ -256,13 +261,15 @@ app.post("/api/reservations", async (req, res) => {
       remainingAmount: remainingAmount,
       customerId: user.stripeCustomerId,
       customerEmail: user.email,
+      status: 'pending',
+      paymentHeld: true, // New field to track if payment is being held
     });
+
     const savedReservation = await newReservation.save();
 
     res.status(201).json({
       ...savedReservation.toObject(),
       clientSecret: paymentIntent.client_secret,
-      setupIntentSecret: setupIntent.client_secret,
     });
   } catch (error) {
     console.error(error);
@@ -304,6 +311,51 @@ app.post("/api/reservations/:id/payment-method", async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(400).json({ message: error.message });
+  }
+});
+
+// Release held payment
+app.post("/api/reservations/:id/release-payment", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const reservation = await Reservation.findById(id);
+    if (!reservation) {
+      return res.status(404).json({ message: "Reservation not found" });
+    }
+
+    if (!reservation.paymentHeld) {
+      return res.status(400).json({ message: "No payment is being held for this reservation" });
+    }
+
+    try {
+      // Capture the held payment
+      const paymentIntent = await stripe.paymentIntents.capture(
+        reservation.depositPaymentIntentId
+      );
+
+      // Update reservation status
+      reservation.paymentHeld = false;
+      await reservation.save();
+
+      return res.json({
+        success: true,
+        message: "Payment released successfully",
+        paymentIntent: paymentIntent
+      });
+    } catch (stripeError) {
+      console.error('Stripe error:', stripeError);
+      return res.status(400).json({
+        message: "Failed to release payment",
+        error: stripeError.message
+      });
+    }
+  } catch (error) {
+    console.error('Server error:', error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message
+    });
   }
 });
 
