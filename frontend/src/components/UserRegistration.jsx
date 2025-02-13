@@ -4,10 +4,15 @@ import { useNavigate } from 'react-router-dom';
 function UserRegistration() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
+    const [role, setRole] = useState('user');
+    const [success, setSuccess] = useState(false);
+    const [error, setError] = useState(null);
     const navigate = useNavigate();
 
-    const handleSubmit = async (event) => {
-        event.preventDefault();
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError(null);
+        setSuccess(false);
 
         try {
             const response = await fetch('http://localhost:5000/api/users', {
@@ -15,33 +20,124 @@ function UserRegistration() {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ name, email }),
+                body: JSON.stringify({ name, email, role }),
             });
 
-            if (response.ok) {
-                navigate('/success');
-            } else {
-                navigate('/error');
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to register user');
             }
-        } catch (error) {
-            console.error(error);
-            navigate('/error');
+
+            setSuccess(true);
+            setName('');
+            setEmail('');
+            setRole('user');
+        } catch (err) {
+            setError(err.message);
         }
     };
 
     return (
-        <div>
-            <h2>Register User</h2>
+        <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+            <h2 style={{ marginBottom: '20px' }}>Register User</h2>
+            
             <form onSubmit={handleSubmit}>
-                <div>
-                    <label>Name:</label>
-                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px' }}>
+                        Name:
+                    </label>
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd'
+                        }}
+                    />
                 </div>
-                <div>
-                    <label>Email:</label>
-                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px' }}>
+                        Email:
+                    </label>
+                    <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd'
+                        }}
+                    />
                 </div>
-                <button type="submit">Register</button>
+
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px' }}>
+                        Role:
+                    </label>
+                    <select
+                        value={role}
+                        onChange={(e) => setRole(e.target.value)}
+                        style={{
+                            width: '100%',
+                            padding: '8px',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd'
+                        }}
+                    >
+                        <option value="user">User</option>
+                        <option value="employee">Employee</option>
+                    </select>
+                </div>
+
+                {error && (
+                    <div style={{ 
+                        marginBottom: '20px',
+                        padding: '10px',
+                        backgroundColor: '#f8d7da',
+                        border: '1px solid #f5c6cb',
+                        borderRadius: '4px',
+                        color: '#721c24'
+                    }}>
+                        {error}
+                    </div>
+                )}
+
+                {success && (
+                    <div style={{ 
+                        marginBottom: '20px',
+                        padding: '10px',
+                        backgroundColor: '#d4edda',
+                        border: '1px solid #c3e6cb',
+                        borderRadius: '4px',
+                        color: '#155724'
+                    }}>
+                        User registered successfully!
+                    </div>
+                )}
+
+                <button
+                    type="submit"
+                    style={{
+                        backgroundColor: '#5469d4',
+                        color: 'white',
+                        padding: '10px 20px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        cursor: 'pointer',
+                        width: '100%'
+                    }}
+                >
+                    Register User
+                </button>
             </form>
         </div>
     );

@@ -1,234 +1,266 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
-// Initialize Stripe outside of component
-const stripePromise = loadStripe(
-  "pk_test_51Qp5LOPs8mVJ1TARXPGnFhtXqSGxyInN2qfw2Suc8Uc9UT4iDcYC90XHcCWjViiqsIidXKA1sSoHEE68SdBXvR8000d6SXeuJa"
-);
+const stripePromise = loadStripe('pk_test_51Qp5LOPs8mVJ1TARXPGnFhtXqSGxyInN2qfw2Suc8Uc9UT4iDcYC90XHcCWjViiqsIidXKA1sSoHEE68SdBXvR8000d6SXeuJa');
 
-const CARD_ELEMENT_OPTIONS = {
-  style: {
-    base: {
-      fontSize: "16px",
-      color: "#424770",
-      "::placeholder": {
-        color: "#aab7c4",
-      },
-    },
-    invalid: {
-      color: "#9e2146",
-    },
-  },
-  hidePostalCode: true,
-};
-
-const CheckoutForm = ({
-  userId,
-  serviceId,
-  setReservationSuccess,
-  setReservationError,
-}) => {
+function CheckoutForm({ userId, serviceId, employeeId, onSuccess }) {
   const stripe = useStripe();
   const elements = useElements();
-  const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [processing, setProcessing] = useState(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setError(null);
-    setIsLoading(true);
+    setProcessing(true);
 
     if (!stripe || !elements) {
-      setError("Stripe has not been initialized");
-      setIsLoading(false);
+      return;
+    }
+
+    const { error, paymentMethod } = await stripe.createPaymentMethod({
+      type: 'card',
+      card: elements.getElement(CardElement),
+    });
+
+    if (error) {
+      setError(error.message);
+      setProcessing(false);
       return;
     }
 
     try {
-      // Create the reservation first
-      const response = await fetch("http://localhost:5000/api/reservations", {
-        method: "POST",
+      const response = await fetch('http://localhost:5000/api/reservations', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId, serviceId }),
-        credentials: "include",
+        body: JSON.stringify({
+          userId,
+          serviceId,
+          employeeId,
+          paymentMethodId: paymentMethod.id,
+        }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to create reservation");
-      }
-
       const data = await response.json();
-      console.log("Reservation created:", data);
 
-      if (!data.clientSecret) {
-        throw new Error("No client secret received from server");
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to create reservation');
       }
 
-      // Confirm the card payment
-      const { error: paymentError, paymentIntent } =
-        await stripe.confirmCardPayment(data.clientSecret, {
-          payment_method: {
-            card: elements.getElement(CardElement),
-            billing_details: {
-              name: "Jenny Rosen",
-            },
-          },
-          setup_future_usage: 'off_session', // This tells Stripe to save the card
-        });
-
-      if (paymentError) {
-        throw new Error(paymentError.message);
-      }
-
-      // Save the payment method ID
-      if (paymentIntent.payment_method) {
-        const saveMethodResponse = await fetch(
-          `http://localhost:5000/api/reservations/${data._id}/payment-method`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              paymentMethodId: paymentIntent.payment_method,
-            }),
-            credentials: "include",
-          }
-        );
-
-        if (!saveMethodResponse.ok) {
-          console.error("Failed to save payment method");
-        }
-      }
-
-      // Payment successful
-      console.log("Payment successful:", paymentIntent);
-      setReservationSuccess(true);
-      navigate("/success");
-    } catch (error) {
-      console.error("Payment failed:", error);
-      setError(error.message);
-      setReservationError(error.message);
+      onSuccess(data);
+    } catch (err) {
+      setError(err.message);
     } finally {
-      setIsLoading(false);
+      setProcessing(false);
     }
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{ maxWidth: "500px", margin: "0 auto" }}
-    >
-      <div style={{ marginBottom: "20px" }}>
-        <CardElement options={CARD_ELEMENT_OPTIONS} />
+    <form onSubmit={handleSubmit}>
+      <div style={{ padding: '10px 0' }}>
+        <CardElement options={{
+          style: {
+            base: {
+              fontSize: '16px',
+              color: '#424770',
+              '::placeholder': {
+                color: '#aab7c4',
+              },
+            },
+            invalid: {
+              color: '#9e2146',
+            },
+          },
+        }} />
       </div>
-      {error && (
-        <div style={{ color: "red", marginBottom: "10px" }}>{error}</div>
-      )}
-      <button
-        type="submit"
-        disabled={!stripe || isLoading}
+      {error && <div style={{ color: 'red', marginTop: '10px' }}>{error}</div>}
+      <button 
+        type="submit" 
+        disabled={!stripe || processing}
         style={{
-          backgroundColor: "#5469d4",
-          color: "white",
-          padding: "10px 20px",
-          borderRadius: "4px",
-          border: "none",
-          cursor: isLoading ? "not-allowed" : "pointer",
-          opacity: isLoading ? 0.7 : 1,
+          backgroundColor: '#5469d4',
+          color: 'white',
+          padding: '10px 20px',
+          borderRadius: '4px',
+          border: 'none',
+          marginTop: '20px',
+          cursor: processing ? 'not-allowed' : 'pointer',
+          opacity: processing ? 0.7 : 1,
         }}
       >
-        {isLoading ? "Processing..." : "Pay Deposit"}
+        {processing ? 'Processing...' : 'Pay and Book'}
       </button>
     </form>
   );
-};
+}
 
 function CreateReservation() {
-  const [userId, setUserId] = useState("");
-  const [serviceId, setServiceId] = useState("");
-  const [reservationSuccess, setReservationSuccess] = useState(false);
-  const [reservationError, setReservationError] = useState(null);
-  const [showPayment, setShowPayment] = useState(false);
+  const [services, setServices] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [selectedService, setSelectedService] = useState('');
+  const [selectedUser, setSelectedUser] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const navigate = useNavigate();
 
-  const handleProceed = (e) => {
-    e.preventDefault();
-    if (userId && serviceId) {
-      setShowPayment(true);
+  useEffect(() => {
+    fetchServices();
+    fetchUsers();
+    fetchEmployees();
+  }, []);
+
+  const fetchServices = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/services');
+      const data = await response.json();
+      setServices(data);
+    } catch (error) {
+      console.error('Error fetching services:', error);
+      setError('Failed to load services');
     }
   };
 
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/users');
+      const data = await response.json();
+      setUsers(data.filter(user => user.role === 'user'));
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      setError('Failed to load users');
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/users');
+      const data = await response.json();
+      setEmployees(data.filter(user => user.role === 'employee' && user.accountSetupComplete));
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      setError('Failed to load employees');
+    }
+  };
+
+  const handleSuccess = (data) => {
+    setSuccess(true);
+    setTimeout(() => {
+      navigate('/reservations');
+    }, 2000);
+  };
+
+  if (success) {
+    return (
+      <div style={{ textAlign: 'center', padding: '20px' }}>
+        <h2 style={{ color: '#4CAF50' }}>Reservation Created Successfully!</h2>
+        <p>Redirecting to reservations list...</p>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
+    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
       <h2>Create Reservation</h2>
-      {!showPayment ? (
-        <form onSubmit={handleProceed}>
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "block", marginBottom: "5px" }}>
-              User ID:
-            </label>
-            <input
-              type="text"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #ddd",
-              }}
-            />
-          </div>
-          <div style={{ marginBottom: "15px" }}>
-            <label style={{ display: "block", marginBottom: "5px" }}>
-              Service ID:
-            </label>
-            <input
-              type="text"
-              value={serviceId}
-              onChange={(e) => setServiceId(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "8px",
-                borderRadius: "4px",
-                border: "1px solid #ddd",
-              }}
-            />
-          </div>
-          <button
-            type="submit"
-            style={{
-              backgroundColor: "#5469d4",
-              color: "white",
-              padding: "10px 20px",
-              borderRadius: "4px",
-              border: "none",
-              cursor: "pointer",
+      {error && <div style={{ color: 'red', marginBottom: '20px' }}>{error}</div>}
+      
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Select Service:
+          <select 
+            value={selectedService} 
+            onChange={(e) => setSelectedService(e.target.value)}
+            style={{ 
+              width: '100%',
+              padding: '8px',
+              marginTop: '5px',
+              borderRadius: '4px',
+              border: '1px solid #ddd'
             }}
           >
-            Proceed to Payment
-          </button>
-        </form>
-      ) : (
+            <option value="">Choose a service...</option>
+            {services.map(service => (
+              <option key={service._id} value={service._id}>
+                {service.name} - ${service.price}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Select User:
+          <select 
+            value={selectedUser} 
+            onChange={(e) => setSelectedUser(e.target.value)}
+            style={{ 
+              width: '100%',
+              padding: '8px',
+              marginTop: '5px',
+              borderRadius: '4px',
+              border: '1px solid #ddd'
+            }}
+          >
+            <option value="">Choose a user...</option>
+            {users.map(user => (
+              <option key={user._id} value={user._id}>
+                {user.name} ({user.email})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Select Employee:
+          <select 
+            value={selectedEmployee} 
+            onChange={(e) => setSelectedEmployee(e.target.value)}
+            style={{ 
+              width: '100%',
+              padding: '8px',
+              marginTop: '5px',
+              borderRadius: '4px',
+              border: '1px solid #ddd'
+            }}
+          >
+            <option value="">Choose an employee...</option>
+            {employees.map(employee => (
+              <option key={employee._id} value={employee._id}>
+                {employee.name} - Ready for payments
+              </option>
+            ))}
+          </select>
+        </label>
+        {employees.length === 0 && (
+          <p
+            style={{
+              color: "#dc3545",
+              fontSize: "0.875rem",
+              marginTop: "5px",
+            }}
+          >
+            No employees available. Employees must complete their payment
+            account setup first.
+          </p>
+        )}
+      </div>
+
+      {selectedService && selectedUser && selectedEmployee && (
         <Elements stripe={stripePromise}>
           <CheckoutForm
-            userId={userId}
-            serviceId={serviceId}
-            setReservationSuccess={setReservationSuccess}
-            setReservationError={setReservationError}
+            userId={selectedUser}
+            serviceId={selectedService}
+            employeeId={selectedEmployee}
+            onSuccess={handleSuccess}
           />
         </Elements>
-      )}
-      {reservationError && (
-        <p style={{ color: "red", marginTop: "10px" }}>
-          Error: {reservationError}
-        </p>
       )}
     </div>
   );
