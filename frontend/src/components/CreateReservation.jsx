@@ -59,41 +59,46 @@ function CheckoutForm({ userId, serviceId, employeeId, onSuccess }) {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div style={{ padding: '10px 0' }}>
-        <CardElement options={{
-          style: {
-            base: {
-              fontSize: '16px',
-              color: '#424770',
-              '::placeholder': {
-                color: '#aab7c4',
+    <div style={{ marginTop: '20px', padding: '20px', border: '1px solid #ddd', borderRadius: '8px' }}>
+      <h3>Payment Details</h3>
+      <form onSubmit={handleSubmit}>
+        <div style={{ padding: '10px 0' }}>
+          <CardElement options={{
+            style: {
+              base: {
+                fontSize: '16px',
+                color: '#424770',
+                '::placeholder': {
+                  color: '#aab7c4',
+                },
+              },
+              invalid: {
+                color: '#9e2146',
               },
             },
-            invalid: {
-              color: '#9e2146',
-            },
-          },
-        }} />
-      </div>
-      {error && <div style={{ color: 'red', marginTop: '10px' }}>{error}</div>}
-      <button 
-        type="submit" 
-        disabled={!stripe || processing}
-        style={{
-          backgroundColor: '#5469d4',
-          color: 'white',
-          padding: '10px 20px',
-          borderRadius: '4px',
-          border: 'none',
-          marginTop: '20px',
-          cursor: processing ? 'not-allowed' : 'pointer',
-          opacity: processing ? 0.7 : 1,
-        }}
-      >
-        {processing ? 'Processing...' : 'Pay and Book'}
-      </button>
-    </form>
+          }} />
+        </div>
+        {error && <div style={{ color: 'red', marginTop: '10px' }}>{error}</div>}
+        <button 
+          type="submit" 
+          disabled={!stripe || processing}
+          style={{
+            backgroundColor: '#5469d4',
+            color: 'white',
+            padding: '10px 20px',
+            borderRadius: '4px',
+            border: 'none',
+            marginTop: '20px',
+            cursor: processing ? 'not-allowed' : 'pointer',
+            opacity: processing ? 0.7 : 1,
+            width: '100%',
+            fontSize: '16px'
+          }}
+        >
+          {processing ? 'Processing...' : 'Pay and Book'}
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -233,23 +238,11 @@ function CreateReservation() {
             <option value="">Choose an employee...</option>
             {employees.map(employee => (
               <option key={employee._id} value={employee._id}>
-                {employee.name} - Ready for payments
+                {employee.name}
               </option>
             ))}
           </select>
         </label>
-        {employees.length === 0 && (
-          <p
-            style={{
-              color: "#dc3545",
-              fontSize: "0.875rem",
-              marginTop: "5px",
-            }}
-          >
-            No employees available. Employees must complete their payment
-            account setup first.
-          </p>
-        )}
       </div>
 
       {selectedService && selectedUser && selectedEmployee && (
